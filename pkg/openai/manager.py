@@ -48,7 +48,7 @@ class OpenAIInteract:
             n=1,
             size="512x512",
         )
-
+        logging.debug("image response:"+str(response))
         return response
 
 def get_inst() -> OpenAIInteract:
