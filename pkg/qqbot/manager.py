@@ -4,6 +4,7 @@ import os
 import threading
 
 import openai.error
+import requests
 from mirai import At, GroupMessage, MessageEvent, Mirai, Plain, StrangerMessage, WebSocketAdapter, HTTPAdapter, \
     FriendMessage, Image
 
@@ -112,7 +113,7 @@ class QQBotManager:
 
     # 统一的消息处理函数
     @func_set_timeout(timeout)
-    def process_message(self, launcher_type: str, launcher_id: int, text_message: str) -> str:
+    def process_message(self, launcher_type: str, launcher_id: int, text_message: str) -> (str, str):
         global processing
         reply = ''
         session_name = "{}_{}".format(launcher_type, launcher_id)
@@ -218,6 +219,13 @@ class QQBotManager:
                                 if api_keys[api_key] == pkg.openai.manager.get_inst().key_mgr.using_key:
                                     using_key_name = api_key
                             reply += "\n当前使用:{}".format(using_key_name)
+                        elif cmd == 'draw':
+                            if len(params) == 0:
+                                reply = "[bot]请输入描述语句"
+
+                            else:
+                                response = pkg.openai.manager.get_inst().request_image(" ".join(params))
+                                reply = response['data'][0]['url']
                     except Exception as e:
                         self.notify_admin("{}指令执行失败:{}".format(session_name, e))
                         logging.exception(e)
@@ -235,12 +243,14 @@ class QQBotManager:
                         reply = "[bot]err:调用API失败，请重试或联系作者，或等待修复"
                     except openai.error.RateLimitError as e:
                         # 尝试切换api-key
-                        current_tokens_amt = pkg.openai.manager.get_inst().key_mgr.get_usage(pkg.openai.manager.get_inst().key_mgr.get_using_key())
+                        current_tokens_amt = pkg.openai.manager.get_inst().key_mgr.get_usage(
+                            pkg.openai.manager.get_inst().key_mgr.get_using_key())
                         pkg.openai.manager.get_inst().key_mgr.set_current_exceeded()
                         switched, name = pkg.openai.manager.get_inst().key_mgr.auto_switch()
 
                         if not switched:
-                            self.notify_admin("API调用额度超限({}),请向OpenAI账户充值或在config.py中更换api_key".format(current_tokens_amt))
+                            self.notify_admin("API调用额度超限({}),请向OpenAI账户充值或在config.py中更换api_key".format(
+                                current_tokens_amt))
                             reply = "[bot]err:API调用额度超额，请联系作者，或等待修复"
                         else:
                             openai.api_key = pkg.openai.manager.get_inst().key_mgr.get_using_key()
@@ -265,7 +275,13 @@ class QQBotManager:
         finally:
             pkg.openai.session.get_session(session_name).release_response_lock()
 
-            return reply
+            # 检查reply是否是url
+            if reply.startswith("http"):
+                # 下载图片
+                reply = [Image(url=reply)]
+                return "image", reply
+
+            return "text", [Plain(reply)]
 
     def send(self, event, msg):
         asyncio.run(self.bot.send(event, msg))
@@ -274,6 +290,7 @@ class QQBotManager:
     def on_person_message(self, event: MessageEvent):
         global processing
 
+        reply_type = "text"
         reply = ''
 
         if event.sender.id == self.bot.qq:
@@ -286,7 +303,7 @@ class QQBotManager:
                 failed = 0
                 for i in range(self.retry):
                     try:
-                        reply = self.process_message('person', event.sender.id, str(event.message_chain))
+                        reply_type, reply = self.process_message('person', event.sender.id, str(event.message_chain))
                         break
                     except FunctionTimedOut:
                         pkg.openai.session.get_session('person_{}'.format(event.sender.id)).release_response_lock()
@@ -305,9 +322,11 @@ class QQBotManager:
     def on_group_message(self, event: GroupMessage):
         global processing
 
+        reply_type = "text"
         reply = ''
 
-        def process(text=None) -> str:
+        def process(text=None) -> (str, str):
+            reply_types = "text"
             replys = ""
             if At(self.bot.qq) in event.message_chain:
                 event.message_chain.remove(At(self.bot.qq))
@@ -318,8 +337,8 @@ class QQBotManager:
             failed = 0
             for i in range(self.retry):
                 try:
-                    replys = self.process_message('group', event.group.id,
-                                                  str(event.message_chain).strip() if text is None else text)
+                    reply_types, replys = self.process_message('group', event.group.id,
+                                                               str(event.message_chain).strip() if text is None else text)
                     break
                 except FunctionTimedOut:
                     failed += 1
@@ -329,7 +348,7 @@ class QQBotManager:
                 self.notify_admin("{} 请求超时".format("group_{}".format(event.sender.id)))
                 replys = "[bot]err:请求超时"
 
-            return replys
+            return reply_types, replys
 
         if Image in event.message_chain:
             pass

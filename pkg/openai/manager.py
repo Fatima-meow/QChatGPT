@@ -41,6 +41,15 @@ class OpenAIInteract:
 
         return response
 
+    def request_image(self, prompt):
+        logging.debug("请求OpenAI Image, key:"+openai.api_key)
+        response = openai.Image.create(
+            prompt=prompt,
+            n=1,
+            size="512x512",
+        )
+
+        return response
 
 def get_inst() -> OpenAIInteract:
     global inst
