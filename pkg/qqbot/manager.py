@@ -113,9 +113,9 @@ class QQBotManager:
 
     # 统一的消息处理函数
     @func_set_timeout(timeout)
-    def process_message(self, launcher_type: str, launcher_id: int, text_message: str) -> (str, str):
+    def process_message(self, launcher_type: str, launcher_id: int, text_message: str) -> (str, []):
         global processing
-        reply = ''
+        reply = []
         session_name = "{}_{}".format(launcher_type, launcher_id)
 
         pkg.openai.session.get_session(session_name).acquire_response_lock()
@@ -313,9 +313,9 @@ class QQBotManager:
                 if failed == self.retry:
                     pkg.openai.session.get_session('person_{}'.format(event.sender.id)).release_response_lock()
                     self.notify_admin("{} 请求超时".format("person_{}".format(event.sender.id)))
-                    reply = "[bot]err:请求超时"
+                    reply = ["[bot]err:请求超时"]
 
-        if reply != '':
+        if reply:
             return self.send(event, reply)
 
     # 群消息处理
@@ -325,11 +325,12 @@ class QQBotManager:
         reply_type = "text"
         reply = ''
 
-        def process(text=None) -> (str, str):
+        def process(text=None) -> (str, []):
             reply_types = "text"
             replys = ""
             if At(self.bot.qq) in event.message_chain:
-                event.message_chain.remove(At(self.bot.qq))
+                mc = event.message_chain
+                mc.remove(At(self.bot.qq))
 
             processing.append("group_{}".format(event.sender.id))
 
@@ -338,7 +339,7 @@ class QQBotManager:
             for i in range(self.retry):
                 try:
                     reply_types, replys = self.process_message('group', event.group.id,
-                                                               str(event.message_chain).strip() if text is None else text)
+                                                               str(mc).strip() if text is None else text)
                     break
                 except FunctionTimedOut:
                     failed += 1
@@ -346,7 +347,7 @@ class QQBotManager:
 
             if failed == self.retry:
                 self.notify_admin("{} 请求超时".format("group_{}".format(event.sender.id)))
-                replys = "[bot]err:请求超时"
+                replys = ["[bot]err:请求超时"]
 
             return reply_types, replys
 
@@ -356,12 +357,12 @@ class QQBotManager:
             check, result = check_response_rule(str(event.message_chain).strip())
 
             if check:
-                reply = process(result.strip())
+                reply_type, reply = process(result.strip())
         else:
             # 直接调用
-            reply = process()
+            reply_type, reply = process()
 
-        if reply != '':
+        if reply:
             return self.send(event, reply)
 
     # 通知系统管理员
