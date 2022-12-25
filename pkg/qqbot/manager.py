@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import json
 import os
 import threading
@@ -115,6 +116,8 @@ class QQBotManager:
     @func_set_timeout(timeout)
     def process_message(self, launcher_type: str, launcher_id: int, text_message: str) -> (str, []):
         global processing
+
+        reply_type = "text"
         reply = []
         session_name = "{}_{}".format(launcher_type, launcher_id)
 
@@ -123,7 +126,7 @@ class QQBotManager:
         try:
             if session_name in processing:
                 pkg.openai.session.get_session(session_name).release_response_lock()
-                return "[bot]err:正在处理中，请稍后再试"
+                return reply_type, ["[bot]err:正在处理中，请稍后再试"]
 
             processing.append(session_name)
 
@@ -139,36 +142,36 @@ class QQBotManager:
 
                         params = text_message[1:].strip().split(' ')[1:]
                         if cmd == 'help':
-                            reply = "[bot]" + help_text
+                            reply = ["[bot]" + help_text]
                         elif cmd == 'reset':
                             pkg.openai.session.get_session(session_name).reset(explicit=True)
-                            reply = "[bot]会话已重置"
+                            reply = ["[bot]会话已重置"]
                         elif cmd == 'last':
                             result = pkg.openai.session.get_session(session_name).last_session()
                             if result is None:
-                                reply = "[bot]没有前一次的对话"
+                                reply = ["[bot]没有前一次的对话"]
                             else:
                                 datetime_str = datetime.datetime.fromtimestamp(result.create_timestamp).strftime(
                                     '%Y-%m-%d %H:%M:%S')
-                                reply = "[bot]已切换到前一次的对话：\n创建时间:{}\n".format(
+                                reply = ["[bot]已切换到前一次的对话：\n创建时间:{}\n".format(
                                     datetime_str) + result.prompt[
                                                     :min(100,
                                                          len(result.prompt))] + \
-                                        ("..." if len(result.prompt) > 100 else "#END#")
+                                        ("..." if len(result.prompt) > 100 else "#END#")]
                         elif cmd == 'next':
                             result = pkg.openai.session.get_session(session_name).next_session()
                             if result is None:
-                                reply = "[bot]没有后一次的对话"
+                                reply = ["[bot]没有后一次的对话"]
                             else:
                                 datetime_str = datetime.datetime.fromtimestamp(result.create_timestamp).strftime(
                                     '%Y-%m-%d %H:%M:%S')
-                                reply = "[bot]已切换到后一次的对话：\n创建时间:{}\n".format(
+                                reply = ["[bot]已切换到后一次的对话：\n创建时间:{}\n".format(
                                     datetime_str) + result.prompt[
                                                     :min(100,
                                                          len(result.prompt))] + \
-                                        ("..." if len(result.prompt) > 100 else "#END#")
+                                        ("..." if len(result.prompt) > 100 else "#END#")]
                         elif cmd == 'prompt':
-                            reply = "[bot]当前对话所有内容：\n" + pkg.openai.session.get_session(session_name).prompt
+                            reply = ["[bot]当前对话所有内容：\n" + pkg.openai.session.get_session(session_name).prompt]
                         elif cmd == 'list':
                             pkg.openai.session.get_session(session_name).persistence()
                             page = 0
@@ -181,14 +184,14 @@ class QQBotManager:
 
                             results = pkg.openai.session.get_session(session_name).list_history(page=page)
                             if len(results) == 0:
-                                reply = "[bot]第{}页没有历史会话".format(page)
+                                reply = ["[bot]第{}页没有历史会话".format(page)]
                             else:
-                                reply = "[bot]历史会话 第{}页：\n".format(page)
+                                reply_str = "[bot]历史会话 第{}页：\n".format(page)
                                 current = -1
                                 for i in range(len(results)):
                                     # 时间(使用create_timestamp转换) 序号 部分内容
                                     datetime_obj = datetime.datetime.fromtimestamp(results[i]['create_timestamp'])
-                                    reply += "#{} 创建:{} {}\n".format(i + page * 10,
+                                    reply_str += "#{} 创建:{} {}\n".format(i + page * 10,
                                                                        datetime_obj.strftime("%Y-%m-%d %H:%M:%S"),
                                                                        results[i]['prompt'][
                                                                        :min(20, len(results[i]['prompt']))])
@@ -196,19 +199,21 @@ class QQBotManager:
                                             session_name).create_timestamp:
                                         current = i + page * 10
 
-                                reply += "\n以上信息倒序排列"
+                                reply_str += "\n以上信息倒序排列"
                                 if current != -1:
-                                    reply += ",当前会话是 #{}\n".format(current)
+                                    reply_str += ",当前会话是 #{}\n".format(current)
                                 else:
-                                    reply += ",当前处于全新会话或不在此页"
+                                    reply_str += ",当前处于全新会话或不在此页"
+
+                                reply = [reply_str]
                         elif cmd == 'usage':
                             api_keys = pkg.openai.manager.get_inst().key_mgr.api_key
-                            reply = "[bot]api-key使用情况:(阈值:{})\n\n".format(
+                            reply_str = "[bot]api-key使用情况:(阈值:{})\n\n".format(
                                 pkg.openai.manager.get_inst().key_mgr.api_key_usage_threshold)
 
                             using_key_name = ""
                             for api_key in api_keys:
-                                reply += "{}:\n - {}字 {}%\n".format(api_key,
+                                reply_str += "{}:\n - {}字 {}%\n".format(api_key,
                                                                      pkg.openai.manager.get_inst().key_mgr.get_usage(
                                                                          api_keys[api_key]),
                                                                      round(
@@ -218,14 +223,22 @@ class QQBotManager:
                                                                          3))
                                 if api_keys[api_key] == pkg.openai.manager.get_inst().key_mgr.using_key:
                                     using_key_name = api_key
-                            reply += "\n当前使用:{}".format(using_key_name)
+                            reply_str += "\n当前使用:{}".format(using_key_name)
+                            reply = [reply_str]
                         elif cmd == 'draw':
                             if len(params) == 0:
-                                reply = "[bot]请输入描述语句"
+                                reply = ["[bot]请输入描述语句"]
 
                             else:
                                 response = pkg.openai.manager.get_inst().request_image(" ".join(params))
-                                reply = response['data'][0]['url']
+                                # 下载结果图片
+                                res = requests.get(
+                                    response['data'][0]['url']
+                                )
+                                # 获取文件base64
+                                base64_data = base64.b64encode(res.content)
+                                reply_type = "base64"
+                                reply = [Image(base64=base64_data)]
                     except Exception as e:
                         self.notify_admin("{}指令执行失败:{}".format(session_name, e))
                         logging.exception(e)
@@ -275,13 +288,7 @@ class QQBotManager:
         finally:
             pkg.openai.session.get_session(session_name).release_response_lock()
 
-            # 检查reply是否是url
-            if reply.startswith("http"):
-                # 下载图片
-                reply = [Image(url=reply)]
-                return "image", reply
-
-            return "text", [Plain(reply)]
+            return reply_type, reply
 
     def send(self, event, msg):
         asyncio.run(self.bot.send(event, msg))
