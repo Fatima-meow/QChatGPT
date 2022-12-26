@@ -335,6 +335,7 @@ class QQBotManager:
         def process(text=None) -> (str, []):
             reply_types = "text"
             replys = ""
+            mc = event.message_chain
             if At(self.bot.qq) in event.message_chain:
                 mc = event.message_chain
                 mc.remove(At(self.bot.qq))
